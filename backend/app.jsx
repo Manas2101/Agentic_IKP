@@ -74,9 +74,22 @@ def create_github_pr(repo_url, branch, new_branch, title, body):
         return {'success': False, 'error': str(e)}
 
 def run_automation_script(csv_path, dry_run=False):
-    script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Agentic-ikp.py')
+    # Get the parent directory of backend folder
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(backend_dir)
+    script_path = os.path.join(project_dir, 'Agentic-ikp.py')
     
-    cmd = ['python3', script_path, '--csv', csv_path]
+    # Check if script exists
+    if not os.path.exists(script_path):
+        return {
+            'success': False,
+            'error': f'Script not found at: {script_path}'
+        }
+    
+    # Use 'python' on Windows, 'python3' on Unix
+    python_cmd = 'python' if os.name == 'nt' else 'python3'
+    
+    cmd = [python_cmd, script_path, '--csv', csv_path]
     if dry_run:
         cmd.append('--dry-run')
     
@@ -85,7 +98,8 @@ def run_automation_script(csv_path, dry_run=False):
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            cwd=project_dir  # Set working directory to project root
         )
         stdout, stderr = process.communicate(timeout=600)
         
@@ -103,6 +117,11 @@ def run_automation_script(csv_path, dry_run=False):
         return {
             'success': False,
             'error': 'Script execution timed out'
+        }
+    except FileNotFoundError as e:
+        return {
+            'success': False,
+            'error': f'Python executable not found. Please ensure Python is installed and in PATH. Error: {str(e)}'
         }
     except Exception as e:
         return {
