@@ -27,10 +27,10 @@ def allowed_file(filename):
 
 def parse_github_url(repo_url):
     """Extract owner and repo name from GitHub URL"""
-    match = re.search(r'github[^/]*/([^/]+)/([^/]+?)(?:\.git)?$', repo_url)
-    if match:
-        return match.group(1), match.group(2)
-    return None, None
+    parts = repo_url.rstrip('/').split('/')
+    owner = parts[-2]
+    repo = parts[-1].replace('.git', '')
+    return owner, repo
 
 def create_github_pr(repo_url, branch, new_branch, title, body):
     """Create a PR using GitHub API"""
@@ -38,15 +38,29 @@ def create_github_pr(repo_url, branch, new_branch, title, body):
         return {'success': False, 'error': 'GitHub token not configured'}
     
     owner, repo = parse_github_url(repo_url)
-    if not owner or not repo:
-        return {'success': False, 'error': 'Invalid GitHub URL'}
     
-    api_url = f'https://api.github.com/repos/{owner}/{repo}/pulls'
+    # Determine GitHub API base URL (support enterprise GitHub)
+    if 'github.com' in repo_url:
+        api_base = 'https://api.github.com'
+    else:
+        # Extract domain for enterprise GitHub (e.g., alm-github.systems.uk.hsbc)
+        domain_match = re.search(r'https?://([^/]+)', repo_url)
+        if domain_match:
+            domain = domain_match.group(1)
+            api_base = f'https://{domain}/api/v3'
+        else:
+            api_base = 'https://api.github.com'
+    
+    api_url = f'{api_base}/repos/{owner}/{repo}/pulls'
+    
+    # Support both old (token) and new (Bearer) GitHub auth formats
+    auth_header = f'Bearer {GITHUB_TOKEN}' if GITHUB_TOKEN.startswith(('ghp_', 'github_pat_')) else f'token {GITHUB_TOKEN}'
     
     headers = {
-        'Authorization': f'token {GITHUB_TOKEN}',
+        'Authorization': auth_header,
         'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
+        'User-Agent': 'hdpv2-automation-tool',
+        'X-GitHub-Api-Version': '2022-11-28'
     }
     
     data = {
@@ -95,12 +109,11 @@ def run_automation_script(csv_path, dry_run=False):
     
     try:
         # Use Popen for better compatibility across Python versions
-        # Set cwd to agent-templates folder where script and all .tmpl files are
+        # Don't set cwd - let the script handle its own directory resolution
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=agent_templates_dir
+            stderr=subprocess.PIPE
         )
         stdout, stderr = process.communicate(timeout=600)
         
