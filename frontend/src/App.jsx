@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, FormInput } from 'lucide-react';
-import BulkUpload from './components/BulkUpload';
-import FormBuilder from './components/FormBuilder';
+import BulkUpload from './components/BulkUpload.jsx';
+import FormBuilder from './components/FormBuilder.jsx';
 
 function App() {
   const [activeTab, setActiveTab] = useState('bulk');
