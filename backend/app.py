@@ -7,6 +7,9 @@ import subprocess
 import shutil
 from werkzeug.utils import secure_filename
 import pandas as pd
+import requests
+import json
+import re
 
 app = Flask(__name__)
 CORS(app)
@@ -17,8 +20,58 @@ ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def parse_github_url(repo_url):
+    """Extract owner and repo name from GitHub URL"""
+    match = re.search(r'github[^/]*/([^/]+)/([^/]+?)(?:\.git)?$', repo_url)
+    if match:
+        return match.group(1), match.group(2)
+    return None, None
+
+def create_github_pr(repo_url, branch, new_branch, title, body):
+    """Create a PR using GitHub API"""
+    if not GITHUB_TOKEN:
+        return {'success': False, 'error': 'GitHub token not configured'}
+    
+    owner, repo = parse_github_url(repo_url)
+    if not owner or not repo:
+        return {'success': False, 'error': 'Invalid GitHub URL'}
+    
+    api_url = f'https://api.github.com/repos/{owner}/{repo}/pulls'
+    
+    headers = {
+        'Authorization': f'token {GITHUB_TOKEN}',
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+    }
+    
+    data = {
+        'title': title,
+        'body': body,
+        'head': new_branch,
+        'base': branch
+    }
+    
+    try:
+        response = requests.post(api_url, headers=headers, json=data)
+        if response.status_code == 201:
+            pr_data = response.json()
+            return {
+                'success': True,
+                'pr_url': pr_data.get('html_url'),
+                'pr_number': pr_data.get('number')
+            }
+        else:
+            return {
+                'success': False,
+                'error': f'GitHub API error: {response.status_code} - {response.text}'
+            }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 def run_automation_script(csv_path, dry_run=False):
     script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Agentic-ikp.py')
@@ -30,7 +83,8 @@ def run_automation_script(csv_path, dry_run=False):
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=600
         )
@@ -66,15 +120,32 @@ def process_csv_data(csv_path):
             for repo in repos:
                 repo_url = repo.get('repoUrl', 'Unknown')
                 app_name = repo.get('appName', 'Unknown')
+                branch = repo.get('branch', 'main')
+                new_branch = f'automation/hdpv2-templates/{app_name}'
                 
-                results.append({
-                    'repo': f"{app_name} ({repo_url})",
-                    'success': True,
-                    'message': 'PR created successfully',
-                    'pr_url': None
-                })
-                success_count += 1
-                pr_count += 1
+                pr_result = create_github_pr(
+                    repo_url=repo_url,
+                    branch=branch,
+                    new_branch=new_branch,
+                    title=f'chore: add HDPV2/IKP templates for {app_name}',
+                    body=f'Automated PR to add HDPV2 pipeline templates for {app_name}'
+                )
+                
+                if pr_result['success']:
+                    results.append({
+                        'repo': f"{app_name} ({repo_url})",
+                        'success': True,
+                        'message': f'PR #{pr_result.get("pr_number")} created successfully',
+                        'pr_url': pr_result.get('pr_url')
+                    })
+                    success_count += 1
+                    pr_count += 1
+                else:
+                    results.append({
+                        'repo': f"{app_name} ({repo_url})",
+                        'success': False,
+                        'error': pr_result.get('error', 'Failed to create PR')
+                    })
         else:
             for repo in repos:
                 repo_url = repo.get('repoUrl', 'Unknown')
@@ -159,10 +230,27 @@ def process_form():
         result = run_automation_script(csv_path)
         
         if result['success']:
-            return jsonify({
-                'message': f'Successfully created PR for {data["appName"]}',
-                'pr_url': None
-            }), 200
+            app_name = data['appName']
+            branch = data['branch']
+            new_branch = f'automation/hdpv2-templates/{app_name}'
+            
+            pr_result = create_github_pr(
+                repo_url=data['repoUrl'],
+                branch=branch,
+                new_branch=new_branch,
+                title=f'chore: add HDPV2/IKP templates for {app_name}',
+                body=f'Automated PR to add HDPV2 pipeline templates for {app_name}'
+            )
+            
+            if pr_result['success']:
+                return jsonify({
+                    'message': f'Successfully created PR #{pr_result.get("pr_number")} for {app_name}',
+                    'pr_url': pr_result.get('pr_url')
+                }), 200
+            else:
+                return jsonify({
+                    'error': pr_result.get('error', 'Failed to create PR')
+                }), 500
         else:
             return jsonify({
                 'error': result.get('error', 'Failed to create PR')
