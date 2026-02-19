@@ -81,19 +81,25 @@ def run_automation_script(csv_path, dry_run=False):
         cmd.append('--dry-run')
     
     try:
-        result = subprocess.run(
+        # Use Popen for better compatibility across Python versions
+        process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=600
+            stderr=subprocess.PIPE
         )
+        stdout, stderr = process.communicate(timeout=600)
+        
+        # Decode bytes to string
+        stdout_str = stdout.decode('utf-8') if isinstance(stdout, bytes) else stdout
+        stderr_str = stderr.decode('utf-8') if isinstance(stderr, bytes) else stderr
+        
         return {
-            'success': result.returncode == 0,
-            'output': result.stdout,
-            'error': result.stderr
+            'success': process.returncode == 0,
+            'output': stdout_str,
+            'error': stderr_str
         }
     except subprocess.TimeoutExpired:
+        process.kill()
         return {
             'success': False,
             'error': 'Script execution timed out'
@@ -101,7 +107,7 @@ def run_automation_script(csv_path, dry_run=False):
     except Exception as e:
         return {
             'success': False,
-            'error': str(e)
+            'error': f'Execution error: {str(e)}'
         }
 
 def process_csv_data(csv_path):
