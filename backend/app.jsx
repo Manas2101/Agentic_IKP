@@ -74,16 +74,16 @@ def create_github_pr(repo_url, branch, new_branch, title, body):
         return {'success': False, 'error': str(e)}
 
 def run_automation_script(csv_path, dry_run=False):
-    # Static path - agent-apply.py is at same level as frontend/backend folders
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    project_dir = os.path.dirname(backend_dir)
-    script_path = os.path.join(project_dir, 'agent-apply.py')
+    # Backend is in agent-templates/Backend/, script is in agent-templates/
+    backend_dir = os.path.dirname(os.path.abspath(__file__))  # .../Backend/
+    agent_templates_dir = os.path.dirname(backend_dir)  # .../agent-templates/
+    script_path = os.path.join(agent_templates_dir, 'agent-apply.py')
     
     # Check if script exists
     if not os.path.exists(script_path):
         return {
             'success': False,
-            'error': f'Script not found at: {script_path}. Please ensure agent-apply.py exists in {project_dir}'
+            'error': f'Script not found at: {script_path}. Please ensure agent-apply.py exists in {agent_templates_dir}'
         }
     
     # Use 'python' on Windows, 'python3' on Unix
@@ -95,11 +95,12 @@ def run_automation_script(csv_path, dry_run=False):
     
     try:
         # Use Popen for better compatibility across Python versions
+        # Set cwd to agent-templates folder where script and all .tmpl files are
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            cwd=project_dir  # Set working directory to project root
+            cwd=agent_templates_dir
         )
         stdout, stderr = process.communicate(timeout=600)
         
