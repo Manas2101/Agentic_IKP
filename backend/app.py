@@ -99,10 +99,14 @@ def parse_script_output(output, repos):
     # Split output into lines for easier parsing
     lines = output.split('\n')
     
+    print(f"DEBUG parse_script_output: Total lines in output: {len(lines)}")
+    
     # For each repo, find its section in the output and check PR status
     for repo in repos:
         app_name = repo.get('appName', 'Unknown')
         repo_url = repo.get('repoUrl', 'Unknown')
+        
+        print(f"DEBUG: Looking for app_name='{app_name}' in output")
         
         # Find the line index where this app starts being processed
         processing_line_idx = -1
@@ -110,10 +114,12 @@ def parse_script_output(output, repos):
             # Script prints: "Processing <app> <repo_url>"
             if f'Processing {app_name}' in line:
                 processing_line_idx = i
+                print(f"DEBUG: Found 'Processing {app_name}' at line {i}: {line}")
                 break
         
         if processing_line_idx == -1:
             # App was not processed
+            print(f"DEBUG: App '{app_name}' NOT found in output - marking as not processed")
             results.append({
                 'repo': f"{app_name} ({repo_url})",
                 'success': False,
@@ -238,14 +244,21 @@ def process_csv_data(csv_path):
             reader = csv.DictReader(f)
             repos = list(reader)
         
+        print(f"DEBUG: Processing {len(repos)} repos from CSV")
+        
         # Script now handles PR creation internally
         result = run_automation_script(csv_path)
+        
+        print(f"DEBUG: Script result success={result['success']}")
+        print(f"DEBUG: Script output length={len(result.get('output', ''))}")
+        print(f"DEBUG: Script output preview: {result.get('output', '')[:500]}")
         
         # Parse script output to extract results
         if result['success'] or result.get('output'):
             output = result.get('output', '')
             results = parse_script_output(output, repos)
             success_count = sum(1 for r in results if r.get('success', False))
+            print(f"DEBUG: Parsed {len(results)} results, {success_count} successful")
         else:
             # Script failed completely
             results = []
