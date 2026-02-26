@@ -11,6 +11,10 @@ import requests
 import json
 import re
 import time
+import urllib3
+
+# Disable SSL warnings when using verify=False
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 CORS(app)
@@ -72,7 +76,7 @@ def create_github_pr(repo_url, branch, new_branch, title, body):
     }
     
     try:
-        response = requests.post(api_url, headers=headers, json=data)
+        response = requests.post(api_url, headers=headers, json=data, verify=False)
         if response.status_code == 201:
             pr_data = response.json()
             return {
