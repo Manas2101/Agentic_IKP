@@ -263,6 +263,8 @@ def process_csv_data(csv_path):
             'results': results,
             'total': len(repos),
             'success': success_count,
+            'success_count': success_count,  # Frontend expects this field name
+            'pr_count': success_count,  # Count PRs created (same as success for now)
             'script_output': result.get('output', '')
         }
     
