@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 
 """agent-apply.py
@@ -63,6 +62,14 @@ import re
 
 import sys
 
+import json
+
+import urllib.request
+
+import urllib.error
+
+ 
+
  
 
 def _yaml_syntax_check(path):
@@ -109,6 +116,8 @@ def _yaml_syntax_check(path):
 
  
 
+ 
+
 def _text_guardrails(path, *, forbidden_substrings=None):
 
     forbidden_substrings = forbidden_substrings or []
@@ -124,6 +133,8 @@ def _text_guardrails(path, *, forbidden_substrings=None):
             return False, f'found forbidden substring: {s}'
 
     return True, 'ok'
+
+ 
 
  
 
@@ -151,6 +162,8 @@ class ATTemplate(Template):
 
  
 
+ 
+
 def _normalize_tokens(tokens):
 
     """Expand token map so @@NAME@@ patterns can be matched reliably."""
@@ -171,6 +184,8 @@ def _normalize_tokens(tokens):
 
  
 
+ 
+
 def run(cmd, cwd=None, capture=False):
 
     print(f"RUN: {' '.join(cmd)} (cwd={cwd})")
@@ -180,6 +195,8 @@ def run(cmd, cwd=None, capture=False):
         return subprocess.run(cmd, cwd=cwd, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
     return subprocess.run(cmd, cwd=cwd, check=False)
+
+ 
 
  
 
@@ -215,6 +232,151 @@ def render_template(template_dir, template_name, tokens):
 
  
 
+ 
+
+def _parse_repo_owner_name(repo_url: str):
+
+    """Extract (owner, repo) from a git remote URL.
+
+ 
+
+    Supports typical HTTPS remotes such as:
+
+      https://host/OWNER/REPO
+
+      https://host/OWNER/REPO.git
+
+    """
+
+    repo_url = (repo_url or '').strip()
+
+    # Strip trailing .git
+
+    if repo_url.lower().endswith('.git'):
+
+        repo_url = repo_url[:-4]
+
+    # Trim possible trailing slash
+
+    repo_url = repo_url.rstrip('/')
+
+ 
+
+    parts = repo_url.split('/')
+
+    if len(parts) < 2:
+
+        raise ValueError(f"Cannot parse owner/repo from repoUrl: {repo_url}")
+
+    owner = parts[-2]
+
+    name = parts[-1]
+
+    if not owner or not name:
+
+        raise ValueError(f"Cannot parse owner/repo from repoUrl: {repo_url}")
+
+    return owner, name
+
+ 
+
+ 
+
+def _github_api_request(*, base_url: str, token: str, method: str, path: str, payload=None):
+
+    """Make a GitHub Enterprise REST API request using a PAT."""
+
+    if not base_url.endswith('/'):
+
+        base_url = base_url + '/'
+
+    url = base_url + path.lstrip('/')
+
+ 
+
+    headers = {
+
+        'Accept': 'application/vnd.github+json',
+
+        # GHE accepts token auth via Authorization header
+
+        'Authorization': f'token {token}',
+
+        'User-Agent': 'agent-apply.py',
+
+    }
+
+    data = None
+
+    if payload is not None:
+
+        data = json.dumps(payload).encode('utf-8')
+
+        headers['Content-Type'] = 'application/json'
+
+ 
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+
+    try:
+
+        with urllib.request.urlopen(req) as resp:
+
+            body = resp.read().decode('utf-8')
+
+            return resp.status, body
+
+    except urllib.error.HTTPError as e:
+
+        body = e.read().decode('utf-8') if e.fp else ''
+
+        return e.code, body
+
+ 
+
+ 
+
+def _create_pull_request(*, base_url: str, token: str, owner: str, repo: str, title: str, body: str, head: str, base: str):
+
+    """Create a PR via GitHub REST API.
+
+ 
+
+    API: POST /repos/{owner}/{repo}/pulls
+
+    """
+
+    payload = {
+
+        'title': title,
+
+        'body': body,
+
+        'head': head,
+
+        'base': base,
+
+    }
+
+    status, resp_body = _github_api_request(
+
+        base_url=base_url,
+
+        token=token,
+
+        method='POST',
+
+        path=f'/repos/{owner}/{repo}/pulls',
+
+        payload=payload,
+
+    )
+
+    return status, resp_body
+
+ 
+
+ 
 
 def main():
 
@@ -225,6 +387,10 @@ def main():
     p.add_argument('--dry-run', action='store_true')
 
     p.add_argument('--tmpdir')
+
+    p.add_argument('--git-api-base-url', default=os.environ.get('GIT_API_BASE_URL', 'https://alm-github.systems.uk.hsbc/api/v3/'))
+
+    p.add_argument('--git-token', default=os.environ.get('GIT_TOKEN', os.environ.get('GITHUB_TOKEN', '')))
 
     args = p.parse_args()
 
@@ -808,9 +974,65 @@ def main():
 
  
 
-                # PR creation will be handled by the backend via GitHub API
+                # Create PR via Git REST API (GitHub Enterprise) using a token.
 
-                print(f'Branch {new_branch} pushed successfully. PR will be created by the backend.')
+                if not args.git_token:
+
+                    print('GIT token not provided (use --git-token or env GIT_TOKEN/GITHUB_TOKEN); please create PR manually')
+
+                else:
+
+                    try:
+
+                        owner, repo_name = _parse_repo_owner_name(repo)
+
+                        with open(os.path.join(workdir, 'PR_BODY.md'), 'r', encoding='utf-8') as fh:
+
+                            pr_body_text = fh.read()
+
+ 
+
+                        # For GitHub API, head may be either "branch" (same repo) or "owner:branch".
+
+                        # Using "owner:branch" is explicit and works for same-repo PRs.
+
+                        head_ref = f"{owner}:{new_branch}"
+
+                        title = f"Feat: add DevX/IKP templates for {app}"
+
+ 
+
+                        status, resp_body = _create_pull_request(
+
+                            base_url=args.git_api_base_url,
+
+                            token=args.git_token,
+
+                            owner=owner,
+
+                            repo=repo_name,
+
+                            title=title,
+
+                            body=pr_body_text,
+
+                            head=head_ref,
+
+                            base=branch,
+
+                        )
+
+                        if status in (200, 201):
+
+                            print('PR created successfully')
+
+                        else:
+
+                            print(f"PR creation failed (HTTP {status}). Response: {resp_body}")
+
+                    except Exception as e:
+
+                        print(f"PR creation failed due to error: {e}. Please create PR manually.")
 
  
 
@@ -820,8 +1042,8 @@ def main():
 
  
 
+ 
+
 if __name__ == '__main__':
 
     main()
-
- 

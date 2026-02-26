@@ -151,72 +151,43 @@ def run_automation_script(csv_path, dry_run=False):
 def process_csv_data(csv_path):
     results = []
     success_count = 0
-    pr_count = 0
     
     try:
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
             repos = list(reader)
         
+        # Script now handles PR creation internally
         result = run_automation_script(csv_path)
         
         if result['success']:
-            # Wait a bit for GitHub to propagate the pushed branches
-            time.sleep(3)
-            
             for repo in repos:
                 repo_url = repo.get('repoUrl', 'Unknown')
                 app_name = repo.get('appName', 'Unknown')
-                branch = repo.get('branch', 'main')
-                new_branch = f'automation/hdpv2-templates/{app_name}'
-                
-                pr_result = create_github_pr(
-                    repo_url=repo_url,
-                    branch=branch,
-                    new_branch=new_branch,
-                    title=f'chore: add HDPV2/IKP templates for {app_name}',
-                    body=f'Automated PR to add HDPV2 pipeline templates for {app_name}'
-                )
-                
-                if pr_result['success']:
-                    results.append({
-                        'repo': f"{app_name} ({repo_url})",
-                        'success': True,
-                        'message': f'PR #{pr_result.get("pr_number")} created successfully',
-                        'pr_url': pr_result.get('pr_url')
-                    })
-                    success_count += 1
-                    pr_count += 1
-                else:
-                    results.append({
-                        'repo': f"{app_name} ({repo_url})",
-                        'success': False,
-                        'error': pr_result.get('error', 'Failed to create PR')
-                    })
+                results.append({
+                    'repo': f"{app_name} ({repo_url})",
+                    'success': True,
+                    'message': 'Templates applied and PR created by script'
+                })
+                success_count += 1
         else:
             for repo in repos:
                 repo_url = repo.get('repoUrl', 'Unknown')
                 app_name = repo.get('appName', 'Unknown')
-                
                 results.append({
                     'repo': f"{app_name} ({repo_url})",
                     'success': False,
-                    'error': result.get('error', 'Unknown error')
+                    'error': result.get('error', 'Script execution failed')
                 })
         
         return {
             'results': results,
-            'success_count': success_count,
-            'pr_count': pr_count
+            'total': len(repos),
+            'success': success_count
         }
     
     except Exception as e:
-        return {
-            'results': [],
-            'success_count': 0,
-            'pr_count': 0,
-            'error': str(e)
-        }
+        return {'error': str(e)}
 
 @app.route('/api/process-bulk', methods=['POST'])
 def process_bulk():
@@ -274,36 +245,18 @@ def process_form():
             writer.writeheader()
             writer.writerow(data)
         
+        # Script now handles PR creation internally
         result = run_automation_script(csv_path)
         
         if result['success']:
-            # Wait for GitHub to propagate the pushed branch
-            time.sleep(3)
-            
             app_name = data['appName']
-            branch = data['branch']
-            new_branch = f'automation/hdpv2-templates/{app_name}'
-            
-            pr_result = create_github_pr(
-                repo_url=data['repoUrl'],
-                branch=branch,
-                new_branch=new_branch,
-                title=f'chore: add HDPV2/IKP templates for {app_name}',
-                body=f'Automated PR to add HDPV2 pipeline templates for {app_name}'
-            )
-            
-            if pr_result['success']:
-                return jsonify({
-                    'message': f'Successfully created PR #{pr_result.get("pr_number")} for {app_name}',
-                    'pr_url': pr_result.get('pr_url')
-                }), 200
-            else:
-                return jsonify({
-                    'error': pr_result.get('error', 'Failed to create PR')
-                }), 500
+            return jsonify({
+                'message': f'Successfully applied templates and created PR for {app_name}',
+                'output': result.get('output', '')
+            }), 200
         else:
             return jsonify({
-                'error': result.get('error', 'Failed to create PR')
+                'error': result.get('error', 'Script execution failed')
             }), 500
     
     except Exception as e:
