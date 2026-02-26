@@ -92,6 +92,57 @@ def create_github_pr(repo_url, branch, new_branch, title, body):
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+def parse_script_output(output, repos):
+    """Parse script output to extract PR creation results for each repo"""
+    results = []
+    
+    # Look for patterns in output:
+    # "Processing <app_name> <repo_url>"
+    # "PR created successfully" or "PR creation failed"
+    
+    for repo in repos:
+        app_name = repo.get('appName', 'Unknown')
+        repo_url = repo.get('repoUrl', 'Unknown')
+        
+        # Check if this app was processed
+        if f'Processing {app_name}' in output or f'Processing, {app_name}' in output:
+            # Check if PR was created successfully
+            if 'PR created successfully' in output:
+                results.append({
+                    'repo': f"{app_name} ({repo_url})",
+                    'success': True,
+                    'message': 'Templates applied and PR created successfully'
+                })
+            elif 'PR creation failed' in output:
+                # Extract error message if available
+                error_msg = 'PR creation failed - check logs for details'
+                if 'PR creation failed' in output:
+                    # Try to extract the specific error
+                    lines = output.split('\n')
+                    for i, line in enumerate(lines):
+                        if 'PR creation failed' in line and i < len(lines):
+                            error_msg = line.strip()
+                            break
+                results.append({
+                    'repo': f"{app_name} ({repo_url})",
+                    'success': False,
+                    'error': error_msg
+                })
+            else:
+                results.append({
+                    'repo': f"{app_name} ({repo_url})",
+                    'success': True,
+                    'message': 'Templates applied (PR status unknown)'
+                })
+        else:
+            results.append({
+                'repo': f"{app_name} ({repo_url})",
+                'success': False,
+                'error': 'Repository not processed by script'
+            })
+    
+    return results
+
 def run_automation_script(csv_path, dry_run=False):
     # Backend is in agent-templates/Backend/, script is in agent-templates/
     backend_dir = os.path.dirname(os.path.abspath(__file__))  # .../Backend/
@@ -149,9 +200,6 @@ def run_automation_script(csv_path, dry_run=False):
         }
 
 def process_csv_data(csv_path):
-    results = []
-    success_count = 0
-    
     try:
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
@@ -160,17 +208,14 @@ def process_csv_data(csv_path):
         # Script now handles PR creation internally
         result = run_automation_script(csv_path)
         
-        if result['success']:
-            for repo in repos:
-                repo_url = repo.get('repoUrl', 'Unknown')
-                app_name = repo.get('appName', 'Unknown')
-                results.append({
-                    'repo': f"{app_name} ({repo_url})",
-                    'success': True,
-                    'message': 'Templates applied and PR created by script'
-                })
-                success_count += 1
+        # Parse script output to extract results
+        if result['success'] or result.get('output'):
+            output = result.get('output', '')
+            results = parse_script_output(output, repos)
+            success_count = sum(1 for r in results if r.get('success', False))
         else:
+            # Script failed completely
+            results = []
             for repo in repos:
                 repo_url = repo.get('repoUrl', 'Unknown')
                 app_name = repo.get('appName', 'Unknown')
@@ -179,11 +224,13 @@ def process_csv_data(csv_path):
                     'success': False,
                     'error': result.get('error', 'Script execution failed')
                 })
+            success_count = 0
         
         return {
             'results': results,
             'total': len(repos),
-            'success': success_count
+            'success': success_count,
+            'script_output': result.get('output', '')
         }
     
     except Exception as e:
@@ -248,12 +295,27 @@ def process_form():
         # Script now handles PR creation internally
         result = run_automation_script(csv_path)
         
-        if result['success']:
-            app_name = data['appName']
-            return jsonify({
-                'message': f'Successfully applied templates and created PR for {app_name}',
-                'output': result.get('output', '')
-            }), 200
+        app_name = data['appName']
+        output = result.get('output', '')
+        
+        if result['success'] or output:
+            # Check if PR was created successfully
+            if 'PR created successfully' in output:
+                return jsonify({
+                    'message': f'Successfully applied templates and created PR for {app_name}',
+                    'output': output
+                }), 200
+            elif 'PR creation failed' in output:
+                return jsonify({
+                    'message': f'Templates applied for {app_name} but PR creation failed',
+                    'output': output,
+                    'warning': 'PR was not created - check output for details'
+                }), 200
+            else:
+                return jsonify({
+                    'message': f'Templates applied for {app_name}',
+                    'output': output
+                }), 200
         else:
             return jsonify({
                 'error': result.get('error', 'Script execution failed')
