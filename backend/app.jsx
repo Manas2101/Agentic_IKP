@@ -96,49 +96,72 @@ def parse_script_output(output, repos):
     """Parse script output to extract PR creation results for each repo"""
     results = []
     
-    # Look for patterns in output:
-    # "Processing <app_name> <repo_url>"
-    # "PR created successfully" or "PR creation failed"
+    # Split output into lines for easier parsing
+    lines = output.split('\n')
     
+    # For each repo, find its section in the output and check PR status
     for repo in repos:
         app_name = repo.get('appName', 'Unknown')
         repo_url = repo.get('repoUrl', 'Unknown')
         
-        # Check if this app was processed
-        if f'Processing {app_name}' in output or f'Processing, {app_name}' in output:
-            # Check if PR was created successfully
-            if 'PR created successfully' in output:
-                results.append({
-                    'repo': f"{app_name} ({repo_url})",
-                    'success': True,
-                    'message': 'Templates applied and PR created successfully'
-                })
-            elif 'PR creation failed' in output:
-                # Extract error message if available
-                error_msg = 'PR creation failed - check logs for details'
-                if 'PR creation failed' in output:
-                    # Try to extract the specific error
-                    lines = output.split('\n')
-                    for i, line in enumerate(lines):
-                        if 'PR creation failed' in line and i < len(lines):
-                            error_msg = line.strip()
-                            break
-                results.append({
-                    'repo': f"{app_name} ({repo_url})",
-                    'success': False,
-                    'error': error_msg
-                })
-            else:
-                results.append({
-                    'repo': f"{app_name} ({repo_url})",
-                    'success': True,
-                    'message': 'Templates applied (PR status unknown)'
-                })
-        else:
+        # Find the line index where this app starts being processed
+        processing_line_idx = -1
+        for i, line in enumerate(lines):
+            # Script prints: "Processing <app> <repo_url>"
+            if f'Processing {app_name}' in line:
+                processing_line_idx = i
+                break
+        
+        if processing_line_idx == -1:
+            # App was not processed
             results.append({
                 'repo': f"{app_name} ({repo_url})",
                 'success': False,
                 'error': 'Repository not processed by script'
+            })
+            continue
+        
+        # Find the next "Processing" line to determine the boundary of this app's output
+        next_processing_idx = len(lines)
+        for i in range(processing_line_idx + 1, len(lines)):
+            if lines[i].startswith('Processing '):
+                next_processing_idx = i
+                break
+        
+        # Get this app's output section
+        app_output = '\n'.join(lines[processing_line_idx:next_processing_idx])
+        
+        # Check PR status in this app's section
+        if 'PR created successfully' in app_output:
+            results.append({
+                'repo': f"{app_name} ({repo_url})",
+                'success': True,
+                'message': 'Templates applied and PR created successfully'
+            })
+        elif 'PR creation failed' in app_output:
+            # Extract error message
+            error_msg = 'PR creation failed - check logs for details'
+            for line in app_output.split('\n'):
+                if 'PR creation failed' in line:
+                    error_msg = line.strip()
+                    break
+            results.append({
+                'repo': f"{app_name} ({repo_url})",
+                'success': False,
+                'error': error_msg
+            })
+        elif 'GIT token not provided' in app_output:
+            results.append({
+                'repo': f"{app_name} ({repo_url})",
+                'success': False,
+                'error': 'GitHub token not provided - PR not created'
+            })
+        else:
+            # Templates applied but PR status unclear
+            results.append({
+                'repo': f"{app_name} ({repo_url})",
+                'success': True,
+                'message': 'Templates applied (PR status unknown - check logs)'
             })
     
     return results
