@@ -133,11 +133,21 @@ def parse_script_output(output, repos):
         
         # Check PR status in this app's section
         if 'PR created successfully' in app_output:
-            results.append({
+            # Extract PR URL if available (format: PR_URL=https://...)
+            pr_url = None
+            for line in app_output.split('\n'):
+                if line.startswith('PR_URL='):
+                    pr_url = line.replace('PR_URL=', '').strip()
+                    break
+            
+            result_data = {
                 'repo': f"{app_name} ({repo_url})",
                 'success': True,
                 'message': 'Templates applied and PR created successfully'
-            })
+            }
+            if pr_url:
+                result_data['pr_url'] = pr_url
+            results.append(result_data)
         elif 'PR creation failed' in app_output:
             # Extract error message
             error_msg = 'PR creation failed - check logs for details'

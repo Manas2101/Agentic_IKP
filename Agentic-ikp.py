@@ -1024,7 +1024,18 @@ def main():
 
                         if status in (200, 201):
 
-                            print('PR created successfully')
+                            # Parse response to get PR URL
+                            try:
+                                pr_data = json.loads(resp_body)
+                                pr_url = pr_data.get('html_url', '')
+                                pr_number = pr_data.get('number', '')
+                                if pr_url:
+                                    print(f'PR created successfully: {pr_url}')
+                                    print(f'PR_URL={pr_url}')  # Machine-readable format for backend parsing
+                                else:
+                                    print('PR created successfully')
+                            except:
+                                print('PR created successfully')
 
                         else:
 
