@@ -232,7 +232,7 @@ def main():
 
     tmpdir = args.tmpdir or tempfile.mkdtemp(prefix='agent-apply-')
 
-    template_dir = 'agent-templates'
+    template_dir = os.path.dirname(os.path.abspath(__file__))
 
  
 
