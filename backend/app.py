@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 import json
 import re
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -156,6 +157,9 @@ def process_csv_data(csv_path):
         result = run_automation_script(csv_path)
         
         if result['success']:
+            # Wait a bit for GitHub to propagate the pushed branches
+            time.sleep(3)
+            
             for repo in repos:
                 repo_url = repo.get('repoUrl', 'Unknown')
                 app_name = repo.get('appName', 'Unknown')
@@ -269,6 +273,9 @@ def process_form():
         result = run_automation_script(csv_path)
         
         if result['success']:
+            # Wait for GitHub to propagate the pushed branch
+            time.sleep(3)
+            
             app_name = data['appName']
             branch = data['branch']
             new_branch = f'automation/hdpv2-templates/{app_name}'
